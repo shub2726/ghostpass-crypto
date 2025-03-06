@@ -1,0 +1,19 @@
+client
+- register and login with server
+- once logged in, upload documents
+- interacts with third party
+- asks server for token for the document
+- sends token back to third party
+
+server
+- register and login feature
+- generates token for the queried documents, if available
+- checks token validity and verifies if valid
+
+third-party
+- ask client for document verification token
+- gets token from client
+- verified token by connecting with server
+
+maintain CIA everywhere
+- when sending documents, tokens, registration, token verification
