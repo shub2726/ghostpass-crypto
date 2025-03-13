@@ -5,13 +5,16 @@ import os
 import base64
 import hmac
 import hashlib
+import datetime
 from Crypto.Cipher import AES
 
-def send_request(data, description):
+CHUNK_SIZE = 4096  # 4 KB per chunk
+
+def send_request(data, description, port):
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         print(f"[CLIENT] Sending: {description}...")
-        client.connect(("127.0.0.1", 12345))
+        client.connect(("127.0.0.1", port))
         client.send(json.dumps(data).encode())
         response = json.loads(client.recv(4096).decode())
         print(f"[CLIENT] Response: {response}")
@@ -34,8 +37,49 @@ def encrypt_aes(plaintext, aes_key):
         hmac_value  # Send HMAC along with encrypted data
     )
 
+def encrypt_chunk(data, aes_key):
+    """Encrypt a chunk using AES-256-GCM"""
+    cipher = AES.new(aes_key, AES.MODE_GCM)
+    encrypted_data = cipher.encrypt(data)
+    return base64.b64encode(encrypted_data).decode(), base64.b64encode(cipher.nonce).decode()
+
+def send_file(filename, aes_key, server_ip="127.0.0.1", port=12346):
+    """Sends an encrypted file in chunks to the server"""
+    if not os.path.exists(filename):
+        print("[CLIENT] File not found.")
+        return
+
+    print(f"[CLIENT] Sending {filename}...")
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
+        client_socket.connect((server_ip, port))
+        
+        # Send filename first
+        name, ext = os.path.splitext(os.path.basename(filename))
+        modified_filename = f"{username}_{name}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+        encrypted_filename, nonce_filename = encrypt_chunk(modified_filename.encode(), aes_key)
+        metadata = {
+            "filename": encrypted_filename,
+            "nonce": nonce_filename
+        }
+        client_socket.send((json.dumps(metadata) + "\n").encode())
+
+        # Send file data in chunks
+        with open(filename, "rb") as f:
+            while chunk := f.read(CHUNK_SIZE):
+                encrypted_chunk, nonce_chunk = encrypt_chunk(chunk, aes_key)
+                chunk_data = {
+                    "chunk": encrypted_chunk,
+                    "nonce": nonce_chunk
+                }
+                client_socket.send((json.dumps(chunk_data) + "\n").encode())
+
+        # Send completion message
+        client_socket.send((json.dumps({"action": "done"}) + "\n").encode())
+        print("[CLIENT] File sent successfully.")
+
 # Step 1: Request public key
-response = send_request({"action": "get_public_key"}, "RSA Public Key Request")
+response = send_request({"action": "get_public_key"}, "RSA Public Key Request", 12345)
 server_public_key = rsa.PublicKey.load_pkcs1(response["public_key"].encode())
 print("[CLIENT] RSA Public Key Received.")
 
@@ -49,7 +93,7 @@ encrypted_aes_key = rsa.encrypt(aes_key, server_public_key)
 print(f"[CLIENT] Encrypted AES Key: {encrypted_aes_key.hex()}")
 
 # Step 4: Send encrypted AES key to server
-send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key.hex()}, "Encrypted AES Key")
+send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key.hex()}, "Encrypted AES Key", 12345)
 
 # Step 5: User selects register or login
 while True:
@@ -68,7 +112,7 @@ encrypted_username, nonce_username, hmac_username = encrypt_aes(username, aes_ke
 encrypted_password, nonce_password, hmac_password = encrypt_aes(password, aes_key)
 
 # Step 7: Send encrypted credentials to server
-send_request({
+action_response = send_request({
     "action": action,
     "username": encrypted_username,
     "password": encrypted_password,
@@ -76,4 +120,47 @@ send_request({
     "nonce_password": nonce_password,
     "hmac_username": hmac_username,
     "hmac_password": hmac_password
-}, f"Encrypted Credentials for {action.capitalize()}")
+}, f"Encrypted Credentials for {action.capitalize()}", 12345)
+
+documents_uploaded = 0
+
+## integrate upload logic with main client
+documents_uploaded = 0
+if action_response["status"] == "success":
+    response = send_request({"action": "get_public_key"}, "RSA Public Key Request", 12346)
+    file_public_key = rsa.PublicKey.load_pkcs1(response["public_key"].encode())
+    print("[CLIENT] File server RSA Public Key Received.")
+    aadhar_path = None
+    dl_path = None
+    if action_response["aadhar"] == 0:
+        encrypted_aes_key = rsa.encrypt(aes_key, file_public_key)
+        response = send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Encrypted AES Key", 12346)
+        if (response.get("status") == "ready"):
+            aadhar_path = input("Enter path to Aadhar file: ")
+            res = send_request({"action": "start_file_upload"}, "Starting file upload", 12346)
+            if (res.get("status") == "ready"):
+                send_file(aadhar_path, aes_key)
+            documents_uploaded += 1
+        else:
+            print("[CLIENT] Server not ready")
+    if action_response["DL"] == 0:
+        encrypted_aes_key = rsa.encrypt(aes_key, file_public_key)
+        response = send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Encrypted AES Key", 12346)
+        if (response.get("status") == "ready"):
+            dl_path = input("Enter path to DL file: ")
+            res = send_request({"action": "start_file_upload"}, "Starting file upload", 12346)
+            if (res.get("status") == "ready"):
+                send_file(dl_path, aes_key)
+            documents_uploaded += 1
+        else:
+            print("[CLIENT] Server not ready")
+    if action_response["aadhar"] == 1 and action_response["DL"] == 1:
+        print("[CLIENT] Documents are secured.")
+        documents_uploaded = 1
+else:
+    exit(1)
+
+if documents_uploaded == 2:
+    send_request({"action": "store_file_details", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Stored file details", 12346)
+
+print("Token generation")

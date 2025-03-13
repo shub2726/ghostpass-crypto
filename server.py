@@ -5,6 +5,7 @@ import base64
 import hmac
 import hashlib
 from Crypto.Cipher import AES
+from concurrent.futures import ThreadPoolExecutor
 from database import init_db, store_user, user_exists, verify_user
 
 # Initialize database
@@ -76,17 +77,24 @@ def handle_client(client_socket):
                     print(f"[SERVER] Decrypted Password: {password}")
 
                     if request["action"] == "register":
-                        if user_exists(username):
-                            response = {"status": "error", "message": "Username already exists"}
+                        user_obj = user_exists(username)
+                        if user_obj:
+                            print(user_obj)
+                            aadhar_check = user_obj[3]
+                            DL_check = user_obj[4]
+                            response = {"status": "error", "message": "Username already exists", "aadhar": aadhar_check, "DL": DL_check}
                         else:
                             if store_user(username, password):
-                                response = {"status": "success", "message": "User registered"}
+                                response = {"status": "success", "message": "User registered", "aadhar": 0, "DL": 0}
                             else:
                                 response = {"status": "error", "message": "Database error"}
 
                     elif request["action"] == "login":
                         if verify_user(username, password):
-                            response = {"status": "success", "message": "Login successful"}
+                            user_obj = user_exists(username)
+                            aadhar_check = user_obj[3]
+                            DL_check = user_obj[4]
+                            response = {"status": "success", "message": "Login successful", "aadhar": aadhar_check, "DL": DL_check}
                         else:
                             response = {"status": "error", "message": "Invalid username or password"}
 
@@ -109,9 +117,11 @@ def start_server():
     server.listen(5)
     print("[SERVER] Waiting for connections...")
 
-    while True:
-        client_socket, _ = server.accept()
-        handle_client(client_socket)
+    with ThreadPoolExecutor(max_workers = 5) as exe:
+        while True:
+            client_socket, _ = server.accept()
+            ### add multithreading and uploading module
+            exe.submit(handle_client, client_socket)
 
 if __name__ == "__main__":
     start_server()

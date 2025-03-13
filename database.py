@@ -12,7 +12,18 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             username TEXT UNIQUE,
-            password_hash TEXT
+            password_hash TEXT,
+            Aadhar_uploaded INTEGER,
+            DL_uploaded INTEGER       
+        )
+    """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS documents (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER,
+            aadhar_filename TEXT,
+            DL_filename TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
     conn.commit()
@@ -24,11 +35,25 @@ def store_user(username, password):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)", (username, password_hash))
+        cursor.execute("INSERT INTO users (username, password_hash, Aadhar_uploaded, DL_uploaded) VALUES (?, ?, ?, ?)", (username, password_hash, 0, 0))
         conn.commit()
         return True
     except sqlite3.IntegrityError:
         return False  # Username already exists
+    finally:
+        conn.close()
+
+def update_document_status(username):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    ### Insert into another table as well
+    try:
+        cursor.execute("UPDATE users SET Aadhar_uploaded = 1, DL_uploaded = 1 WHERE username = ?", (username,))
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
     finally:
         conn.close()
 
@@ -52,8 +77,8 @@ def user_exists(username):
     """Check if a user exists."""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM users WHERE username = ?", (username,))
-    exists = cursor.fetchone() is not None
+    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
+    exists = cursor.fetchone()
     conn.close()
     return exists
 
