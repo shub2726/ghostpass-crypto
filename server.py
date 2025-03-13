@@ -7,6 +7,11 @@ import hashlib
 from Crypto.Cipher import AES
 from concurrent.futures import ThreadPoolExecutor
 from database import init_db, store_user, user_exists, verify_user
+import datetime
+from datetime import timezone
+import jwt  # For generating/verifying tokens
+
+SECRET_KEY = "super_secret_key"  # Change this in production
 
 # Initialize database
 init_db()
@@ -34,6 +39,16 @@ def verify_hmac(data, received_hmac, aes_key):
     """Verify HMAC to check data integrity"""
     computed_hmac = hmac.new(aes_key, data.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(computed_hmac, received_hmac)
+
+def generate_token(username, document_name):
+    """Generates a signed JWT token for document verification."""
+    payload = {
+        "username": username,
+        "document": document_name,
+        "exp": datetime.datetime.now(timezone.utc) + datetime.timedelta(seconds=15)  # 15-sec expiry
+    }
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+    return token
 
 def handle_client(client_socket):
     global aes_key
@@ -99,6 +114,16 @@ def handle_client(client_socket):
                             response = {"status": "error", "message": "Invalid username or password"}
 
             client_socket.send(json.dumps(response).encode())
+
+        elif request["action"] == "request_token":
+                username = request["username"]
+                document_name = request["document"]
+                token = generate_token(username, document_name)
+                response = {"status": "success", "token": token}
+
+                response_json = json.dumps(response)
+                print(f"[SERVER] Sending response: {response_json}")  # Debugging print
+                client_socket.send(response_json.encode())  # **Send the response to client**
 
         else:
             response = {"status": "error", "message": "Invalid request"}

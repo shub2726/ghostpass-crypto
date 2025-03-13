@@ -78,6 +78,32 @@ def send_file(filename, aes_key, server_ip="127.0.0.1", port=12346):
         client_socket.send((json.dumps({"action": "done"}) + "\n").encode())
         print("[CLIENT] File sent successfully.")
 
+def request_token(server_ip, server_port, username, document):
+    """Requests a token for a specific document from the server."""
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.connect((server_ip, server_port))
+
+    request = {
+        "action": "request_token",
+        "username": username,
+        "document": document
+    }
+
+    client_socket.send(json.dumps(request).encode())
+    
+    raw_response = client_socket.recv(4096).decode()  # Read response
+    print(f"[DEBUG] Raw Response from Server: {repr(raw_response)}")  # Debugging print
+    
+    if not raw_response.strip():  # Check if empty
+        print("[ERROR] Empty response received from server!")
+        return None
+
+    response = json.loads(raw_response)  # Parse JSON safely
+    client_socket.close()
+    
+    return response.get("token")
+
+
 # Step 1: Request public key
 response = send_request({"action": "get_public_key"}, "RSA Public Key Request", 12345)
 server_public_key = rsa.PublicKey.load_pkcs1(response["public_key"].encode())
@@ -164,3 +190,8 @@ if documents_uploaded == 2:
     send_request({"action": "store_file_details", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Stored file details", 12346)
 
 print("Token generation")
+server_ip = "127.0.0.1"
+server_port = 12345
+document = "passport.pdf"
+token = request_token(server_ip, server_port, username, document)
+print("Received Token:", token)
