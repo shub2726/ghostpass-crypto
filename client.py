@@ -103,6 +103,18 @@ def request_token(server_ip, server_port, username, document):
     
     return response.get("token")
 
+def send_token_to_third_party(third_party_ip, third_party_port, token):
+    """Sends the token to a third-party for verification."""
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        client_socket.connect((third_party_ip, third_party_port))
+        request = {"action": "verify_token", "token": token}
+        client_socket.send(json.dumps(request).encode())
+        response = json.loads(client_socket.recv(4096).decode())
+        print(f"[CLIENT] Third-Party Response: {response}")
+    finally:
+        client_socket.close()
+
 
 # Step 1: Request public key
 response = send_request({"action": "get_public_key"}, "RSA Public Key Request", 12345)
@@ -195,3 +207,9 @@ server_port = 12345
 document = "passport.pdf"
 token = request_token(server_ip, server_port, username, document)
 print("Received Token:", token)
+
+
+third_party_ip = "127.0.0.1"  # Replace with actual third-party IP
+third_party_port = 6000  # Replace with actual third-party port
+token_input = input("Enter the token to send to the third party: ")
+send_token_to_third_party(third_party_ip, third_party_port, token_input)

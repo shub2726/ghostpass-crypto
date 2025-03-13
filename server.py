@@ -50,6 +50,16 @@ def generate_token(username, document_name):
     token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
     return token
 
+def verify_token(token):
+    """Verifies a JWT token."""
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])  # ✅ Specify algorithm
+        return payload
+    except jwt.ExpiredSignatureError:
+        return None  # Expired token
+    except jwt.InvalidTokenError:
+        return None  # Invalid token
+
 def handle_client(client_socket):
     global aes_key
     try:
@@ -124,6 +134,18 @@ def handle_client(client_socket):
                 response_json = json.dumps(response)
                 print(f"[SERVER] Sending response: {response_json}")  # Debugging print
                 client_socket.send(response_json.encode())  # **Send the response to client**
+
+        elif request["action"] == "verify_token":
+            token = request["token"]
+            token_data = verify_token(token)
+            if token_data:
+                response = {"status": "valid", "username": token_data["username"], "document": token_data["document"]}
+            else:
+                response = {"status": "invalid"}
+            
+            response_json = json.dumps(response)
+            print(f"[SERVER] Sending response: {response_json}")  # Debugging print
+            client_socket.send(response_json.encode())  # **Send the response to thirdparty**
 
         else:
             response = {"status": "error", "message": "Invalid request"}
