@@ -4,6 +4,7 @@ import rsa
 import base64
 import hmac
 import hashlib
+import os
 from Crypto.Cipher import AES
 from concurrent.futures import ThreadPoolExecutor
 from database import init_db, store_user, user_exists, verify_user
@@ -12,6 +13,7 @@ from datetime import timezone
 import jwt  # For generating/verifying tokens
 
 SECRET_KEY = "super_secret_key"  # Change this in production
+UPLOAD_DIR = "uploads"
 
 # Initialize database
 init_db()
@@ -40,13 +42,19 @@ def verify_hmac(data, received_hmac, aes_key):
     computed_hmac = hmac.new(aes_key, data.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(computed_hmac, received_hmac)
 
-def generate_token(username, document_name):
-    """Generates a signed JWT token for document verification."""
+def generate_token(username):
+    """Generates a token containing all documents associated with a user in the uploads directory."""
+    user_files = [f for f in os.listdir("uploads") if f.startswith(f"{username}_")]
+
+    if not user_files:
+        return None  # No documents found for the user
+
     payload = {
         "username": username,
-        "document": document_name,
+        "documents": user_files,  # List of files for the user
         "exp": datetime.datetime.now(timezone.utc) + datetime.timedelta(seconds=15)  # 15-sec expiry
     }
+
     token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
     return token
 
@@ -127,10 +135,8 @@ def handle_client(client_socket):
 
         elif request["action"] == "request_token":
                 username = request["username"]
-                document_name = request["document"]
-                token = generate_token(username, document_name)
+                token = generate_token(username)
                 response = {"status": "success", "token": token}
-
                 response_json = json.dumps(response)
                 print(f"[SERVER] Sending response: {response_json}")  # Debugging print
                 client_socket.send(response_json.encode())  # **Send the response to client**
@@ -139,7 +145,7 @@ def handle_client(client_socket):
             token = request["token"]
             token_data = verify_token(token)
             if token_data:
-                response = {"status": "valid", "username": token_data["username"], "document": token_data["document"]}
+                response = {"status": "valid", "username": token_data["username"]}
             else:
                 response = {"status": "invalid"}
             

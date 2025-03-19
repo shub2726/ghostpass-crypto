@@ -78,15 +78,14 @@ def send_file(filename, aes_key, server_ip="127.0.0.1", port=12346):
         client_socket.send((json.dumps({"action": "done"}) + "\n").encode())
         print("[CLIENT] File sent successfully.")
 
-def request_token(server_ip, server_port, username, document):
+def request_token(server_ip, server_port, username):
     """Requests a token for a specific document from the server."""
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((server_ip, server_port))
 
     request = {
         "action": "request_token",
-        "username": username,
-        "document": document
+        "username": username
     }
 
     client_socket.send(json.dumps(request).encode())
@@ -201,14 +200,14 @@ else:
 if documents_uploaded == 2:
     send_request({"action": "store_file_details", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Stored file details", 12346)
 
+## Token Generation
 print("Token generation")
 server_ip = "127.0.0.1"
 server_port = 12345
-document = "passport.pdf"
-token = request_token(server_ip, server_port, username, document)
+token = request_token(server_ip, server_port, username)
 print("Received Token:", token)
 
-
+## Token Validation
 third_party_ip = "127.0.0.1"  # Replace with actual third-party IP
 third_party_port = 6000  # Replace with actual third-party port
 token_input = input("Enter the token to send to the third party: ")
