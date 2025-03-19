@@ -161,7 +161,7 @@ action_response = send_request({
 
 documents_uploaded = 0
 
-## integrate upload logic with main client
+## Step 8: Upload Docs by Client
 documents_uploaded = 0
 if action_response["status"] == "success":
     response = send_request({"action": "get_public_key"}, "RSA Public Key Request", 12346)
@@ -200,14 +200,14 @@ else:
 if documents_uploaded == 2:
     send_request({"action": "store_file_details", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Stored file details", 12346)
 
-## Token Generation
+## Step 9: Token Generation
 print("Token generation")
 server_ip = "127.0.0.1"
 server_port = 12345
 token = request_token(server_ip, server_port, username)
 print("Received Token:", token)
 
-## Token Validation
+## Step 10: Token Validation
 third_party_ip = "127.0.0.1"  # Replace with actual third-party IP
 third_party_port = 6000  # Replace with actual third-party port
 token_input = input("Enter the token to send to the third party: ")
