@@ -9,6 +9,7 @@ def verify_token_with_server(server_ip, server_port, token):
         request = {"action": "verify_token", "token": token}
         client_socket.send(json.dumps(request).encode())
         response = json.loads(client_socket.recv(4096).decode())
+        print(f"[THIRD-PARTY] {response}")
         return response
     finally:
         client_socket.close()
@@ -18,6 +19,7 @@ def handle_third_party_request(client_socket):
     request = json.loads(client_socket.recv(4096).decode())
     if request["action"] == "verify_token":
         token = request["token"]
+        print(f"[THIRD-PARTY] Token received: {token}")
         
         # Forward the token to the server for verification
         server_ip = "127.0.0.1"
