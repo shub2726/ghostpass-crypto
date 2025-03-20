@@ -43,7 +43,7 @@ def encrypt_chunk(data, aes_key):
     encrypted_data = cipher.encrypt(data)
     return base64.b64encode(encrypted_data).decode(), base64.b64encode(cipher.nonce).decode()
 
-def send_file(filename, aes_key, server_ip="127.0.0.1", port=12346):
+def send_file(filename, aes_key, file_type, server_ip="127.0.0.1", port=12346):
     """Sends an encrypted file in chunks to the server"""
     if not os.path.exists(filename):
         print("[CLIENT] File not found.")
@@ -56,7 +56,7 @@ def send_file(filename, aes_key, server_ip="127.0.0.1", port=12346):
         
         # Send filename first
         name, ext = os.path.splitext(os.path.basename(filename))
-        modified_filename = f"{username}_{name}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+        modified_filename = f"{username}_{file_type}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
         encrypted_filename, nonce_filename = encrypt_chunk(modified_filename.encode(), aes_key)
         hmac_value = hmac.new(aes_key, modified_filename.encode(), hashlib.sha256).hexdigest()
         metadata = {
@@ -80,6 +80,45 @@ def send_file(filename, aes_key, server_ip="127.0.0.1", port=12346):
         # Send completion message
         client_socket.send((json.dumps({"action": "done"}) + "\n").encode())
         print("[CLIENT] File sent successfully.")
+
+def request_token(server_ip, server_port, username, docs):
+    """Requests a token for a specific document from the server."""
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.connect((server_ip, server_port))
+
+    request = {
+        "action": "request_token",
+        "username": username,
+        "docs": docs
+    }
+
+    client_socket.send(json.dumps(request).encode())
+    
+    raw_response = client_socket.recv(4096).decode()  # Read response
+    ##print(f"[DEBUG] Raw Response from Server: {repr(raw_response)}")  # Debugging print
+    
+    if not raw_response.strip():  # Check if empty
+        print("[ERROR] Empty response received from server!")
+        return None
+
+    response = json.loads(raw_response)  # Parse JSON safely
+    client_socket.close()
+    
+    return response.get("token")
+
+def ask_for_needed_documents(third_party_ip, third_party_port):
+    """asks which documents are needed by a third-party for verification."""
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        client_socket.connect((third_party_ip, third_party_port))
+        request = {"action": "ask_needed_docs"}
+        client_socket.send(json.dumps(request).encode())
+        response = json.loads(client_socket.recv(4096).decode())
+        print(f"[CLIENT] Third-Party Response: {response}")
+        return response
+    finally:
+        client_socket.close()
+
 
 # Step 1: Request public key
 response = send_request({"action": "get_public_key"}, "RSA Public Key Request", 12345)
@@ -127,7 +166,7 @@ action_response = send_request({
 
 documents_uploaded = 0
 
-## integrate upload logic with main client
+## Step 8: Upload Docs by Client
 documents_uploaded = 0
 if action_response["status"] == "success":
     response = send_request({"action": "get_public_key"}, "RSA Public Key Request", 12346)
@@ -142,7 +181,7 @@ if action_response["status"] == "success":
             aadhar_path = input("Enter path to Aadhar file: ")
             res = send_request({"action": "start_file_upload"}, "Starting file upload", 12346)
             if (res.get("status") == "ready"):
-                send_file(aadhar_path, aes_key)
+                send_file(aadhar_path, aes_key, "aadhar")
             documents_uploaded += 1
         else:
             print("[CLIENT] Server not ready")
@@ -153,7 +192,7 @@ if action_response["status"] == "success":
             dl_path = input("Enter path to DL file: ")
             res = send_request({"action": "start_file_upload"}, "Starting file upload", 12346)
             if (res.get("status") == "ready"):
-                send_file(dl_path, aes_key)
+                send_file(dl_path, aes_key, "DL")
             documents_uploaded += 1
         else:
             print("[CLIENT] Server not ready")
@@ -166,4 +205,17 @@ else:
 if documents_uploaded == 2:
     send_request({"action": "store_file_details", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Stored file details", 12346)
 
-print("Token generation")
+third_party_ip = "127.0.0.1"  # Replace with actual third-party IP
+third_party_port = 6000  # Replace with actual third-party port
+server_ip = "127.0.0.1"
+server_port = 12345
+
+## Step 9: Connecting with Third Party
+docs = ask_for_needed_documents(third_party_ip, third_party_port)
+
+## Step 10: Token Generation
+print(f"Token generation for {docs}")
+token = request_token(server_ip, server_port, username, docs)
+print("Received Token:", token)
+
+

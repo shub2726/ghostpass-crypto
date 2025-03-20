@@ -4,9 +4,16 @@ import rsa
 import base64
 import hmac
 import hashlib
+import os
 from Crypto.Cipher import AES
 from concurrent.futures import ThreadPoolExecutor
 from database import init_db, store_user, user_exists, verify_user
+import datetime
+from datetime import timezone
+import jwt  # For generating/verifying tokens
+
+SECRET_KEY = "super_secret_key"  # Change this in production
+UPLOAD_DIR = "uploads"
 
 # Initialize database
 init_db()
@@ -34,6 +41,53 @@ def verify_hmac(data, received_hmac, aes_key):
     """Verify HMAC to check data integrity"""
     computed_hmac = hmac.new(aes_key, data.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(computed_hmac, received_hmac)
+
+token_store = {}  # Temporary storage in memory
+
+def generate_token(username, docs):
+    """Generates a token and stores it temporarily with document info."""
+    user_files = [
+        f for f in os.listdir("uploads") 
+        if any(f.startswith(f"{username}_{doc}_") for doc in docs)
+    ]
+
+    if not user_files:
+        return None  # No matching documents found
+
+    payload = {
+        "username": username,
+        "documents": docs,
+        "exp": datetime.datetime.now(timezone.utc) + datetime.timedelta(seconds=15)
+    }
+
+    token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+    
+    # Store the token temporarily in memory
+    token_store[token] = {
+        "username": username,
+        "documents": docs,
+        "expiry": datetime.datetime.now(timezone.utc) + datetime.timedelta(seconds=15)
+    }
+    
+    return token
+
+def verify_token(token, docs):
+    """Verifies token validity and ensures requested docs match the stored ones."""
+    if token not in token_store:
+        return {"status": "invalid", "message": "Token not found"}
+
+    stored_data = token_store[token]
+    original_docs = stored_data["documents"]
+    
+    # Ensure requested docs are a subset of original docs
+    if not docs == original_docs:
+        return {"status": "invalid", "message": "Unauthorized document request"}
+
+    # Check expiry
+    if datetime.datetime.now(timezone.utc) > stored_data["expiry"]:
+        return {"status": "expired", "message": "Token expired"}
+
+    return {"status": "valid", "username": stored_data["username"], "documents": original_docs}
 
 def handle_client(client_socket):
     global aes_key
@@ -99,6 +153,29 @@ def handle_client(client_socket):
                             response = {"status": "error", "message": "Invalid username or password"}
 
             client_socket.send(json.dumps(response).encode())
+
+        elif request["action"] == "request_token":
+                username = request["username"]
+                docs = request["docs"]
+                token = generate_token(username, docs)
+                response = {"status": "success", "token": token}
+                response_json = json.dumps(response)
+                print(f"[SERVER] Sending response: {response_json}")  # Debugging print
+                client_socket.send(response_json.encode())  # **Send the response to client**
+
+        elif request["action"] == "verify_token":
+            token = request["token"]
+            docs = request["docs"]
+            token_data = verify_token(token, docs)
+
+            if token_data["status"] == "valid":
+                response = {"status": "valid", "username": token_data["username"]}
+            else:
+                response = {"status": token_data["status"], "message": token_data["message"]}
+
+            response_json = json.dumps(response)
+            print(f"[SERVER] Sending response: {response_json}")  # Debugging print
+            client_socket.send(response_json.encode())  # **Send the response to third party**
 
         else:
             response = {"status": "error", "message": "Invalid request"}
