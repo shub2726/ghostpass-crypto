@@ -37,7 +37,17 @@ def decrypt_chunk(encrypted_data, nonce, aes_key):
     cipher = AES.new(aes_key, AES.MODE_GCM, nonce=nonce)
     return cipher.decrypt(encrypted_data)
 
-def handle_client(conn, aes_key, file, nonce):
+def verify_hmac(data, received_hmac, aes_key):
+    """Verify HMAC to check data integrity"""
+    computed_hmac = hmac.new(aes_key, data.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(computed_hmac, received_hmac)
+
+def verify_chunk(data, received_hmac, aes_key):
+    computed_hmac = hmac.new(aes_key, data, hashlib.sha256).hexdigest()
+    received_hmac_hex = received_hmac.hex()
+    return hmac.compare_digest(computed_hmac, received_hmac_hex)
+
+def handle_client(conn, aes_key, file, nonce, hmac_received):
     """Receives an encrypted file and stores it after decryption"""
     buffer = ""
     filename = None
@@ -47,6 +57,10 @@ def handle_client(conn, aes_key, file, nonce):
     nonce_filename = base64.b64decode(nonce)
     filename = decrypt_chunk(encrypted_filename, nonce_filename, aes_key).decode()
     file_path = os.path.join(UPLOAD_DIR, os.path.basename(filename))
+    if not verify_hmac(filename, hmac_received, aes_key):
+        print("f[SERVER] Integrity check not passed")
+        return
+    
     try:
         print(f"[SERVER] Receiving file: {file_path}")
 
@@ -75,7 +89,7 @@ def handle_client(conn, aes_key, file, nonce):
                     continue
 
                 if chunk_data.get("action") == "done":
-                    print(f"[SERVER] {filename} received successfully.")
+                    print(f"[SERVER] Integrity check passed and {filename} received successfully.")
                     break
 
                 encrypted_chunk = base64.b64decode(chunk_data["chunk"])
@@ -125,9 +139,11 @@ def file_server():
                 aes_key = rsa.decrypt(encrypted_aes_key, private_key)
                 username = decrypt_aes(data["username"], data["nonce_username"], aes_key)
                 update_document_status(username)
+                conn.send(json.dumps({"status": "File details store"}).encode())
                 continue
             
-            exe.submit(handle_client, conn, aes_key, data['filename'], data['nonce'])
+            hmac_received = data['hmac_value']
+            exe.submit(handle_client, conn, aes_key, data['filename'], data['nonce'], hmac_received)
         
 if __name__ == "__main__":
     file_server()

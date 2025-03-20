@@ -58,9 +58,11 @@ def send_file(filename, aes_key, server_ip="127.0.0.1", port=12346):
         name, ext = os.path.splitext(os.path.basename(filename))
         modified_filename = f"{username}_{name}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
         encrypted_filename, nonce_filename = encrypt_chunk(modified_filename.encode(), aes_key)
+        hmac_value = hmac.new(aes_key, modified_filename.encode(), hashlib.sha256).hexdigest()
         metadata = {
             "filename": encrypted_filename,
-            "nonce": nonce_filename
+            "nonce": nonce_filename,
+            "hmac_value": hmac_value
         }
         client_socket.send((json.dumps(metadata) + "\n").encode())
 
@@ -68,9 +70,10 @@ def send_file(filename, aes_key, server_ip="127.0.0.1", port=12346):
         with open(filename, "rb") as f:
             while chunk := f.read(CHUNK_SIZE):
                 encrypted_chunk, nonce_chunk = encrypt_chunk(chunk, aes_key)
+                hmac_value = hmac.new(aes_key, chunk, hashlib.sha256).hexdigest()
                 chunk_data = {
                     "chunk": encrypted_chunk,
-                    "nonce": nonce_chunk
+                    "nonce": nonce_chunk,
                 }
                 client_socket.send((json.dumps(chunk_data) + "\n").encode())
 
