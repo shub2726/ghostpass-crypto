@@ -43,7 +43,7 @@ def encrypt_chunk(data, aes_key):
     encrypted_data = cipher.encrypt(data)
     return base64.b64encode(encrypted_data).decode(), base64.b64encode(cipher.nonce).decode()
 
-def send_file(filename, aes_key, server_ip="127.0.0.1", port=12346):
+def send_file(filename, aes_key, file_type, server_ip="127.0.0.1", port=12346):
     """Sends an encrypted file in chunks to the server"""
     if not os.path.exists(filename):
         print("[CLIENT] File not found.")
@@ -56,7 +56,7 @@ def send_file(filename, aes_key, server_ip="127.0.0.1", port=12346):
         
         # Send filename first
         name, ext = os.path.splitext(os.path.basename(filename))
-        modified_filename = f"{username}_{name}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
+        modified_filename = f"{username}_{file_type}_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}{ext}"
         encrypted_filename, nonce_filename = encrypt_chunk(modified_filename.encode(), aes_key)
         metadata = {
             "filename": encrypted_filename,
@@ -176,7 +176,7 @@ if action_response["status"] == "success":
             aadhar_path = input("Enter path to Aadhar file: ")
             res = send_request({"action": "start_file_upload"}, "Starting file upload", 12346)
             if (res.get("status") == "ready"):
-                send_file(aadhar_path, aes_key)
+                send_file(aadhar_path, aes_key, "aadhar")
             documents_uploaded += 1
         else:
             print("[CLIENT] Server not ready")
@@ -187,7 +187,7 @@ if action_response["status"] == "success":
             dl_path = input("Enter path to DL file: ")
             res = send_request({"action": "start_file_upload"}, "Starting file upload", 12346)
             if (res.get("status") == "ready"):
-                send_file(dl_path, aes_key)
+                send_file(dl_path, aes_key, "DL")
             documents_uploaded += 1
         else:
             print("[CLIENT] Server not ready")
