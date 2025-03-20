@@ -78,20 +78,21 @@ def send_file(filename, aes_key, file_type, server_ip="127.0.0.1", port=12346):
         client_socket.send((json.dumps({"action": "done"}) + "\n").encode())
         print("[CLIENT] File sent successfully.")
 
-def request_token(server_ip, server_port, username):
+def request_token(server_ip, server_port, username, docs):
     """Requests a token for a specific document from the server."""
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client_socket.connect((server_ip, server_port))
 
     request = {
         "action": "request_token",
-        "username": username
+        "username": username,
+        "docs": docs
     }
 
     client_socket.send(json.dumps(request).encode())
     
     raw_response = client_socket.recv(4096).decode()  # Read response
-    print(f"[DEBUG] Raw Response from Server: {repr(raw_response)}")  # Debugging print
+    ##print(f"[DEBUG] Raw Response from Server: {repr(raw_response)}")  # Debugging print
     
     if not raw_response.strip():  # Check if empty
         print("[ERROR] Empty response received from server!")
@@ -102,15 +103,16 @@ def request_token(server_ip, server_port, username):
     
     return response.get("token")
 
-def send_token_to_third_party(third_party_ip, third_party_port, token):
-    """Sends the token to a third-party for verification."""
+def ask_for_needed_documents(third_party_ip, third_party_port):
+    """asks which documents are needed by a third-party for verification."""
     client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         client_socket.connect((third_party_ip, third_party_port))
-        request = {"action": "verify_token", "token": token}
+        request = {"action": "ask_needed_docs"}
         client_socket.send(json.dumps(request).encode())
         response = json.loads(client_socket.recv(4096).decode())
         print(f"[CLIENT] Third-Party Response: {response}")
+        return response
     finally:
         client_socket.close()
 
@@ -200,15 +202,17 @@ else:
 if documents_uploaded == 2:
     send_request({"action": "store_file_details", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Stored file details", 12346)
 
-## Step 9: Token Generation
-print("Token generation")
-server_ip = "127.0.0.1"
-server_port = 12345
-token = request_token(server_ip, server_port, username)
-print("Received Token:", token)
-
-## Step 10: Token Validation
 third_party_ip = "127.0.0.1"  # Replace with actual third-party IP
 third_party_port = 6000  # Replace with actual third-party port
-token_input = input("Enter the token to send to the third party: ")
-send_token_to_third_party(third_party_ip, third_party_port, token_input)
+server_ip = "127.0.0.1"
+server_port = 12345
+
+## Step 9: Connecting with Third Party
+docs = ask_for_needed_documents(third_party_ip, third_party_port)
+
+## Step 10: Token Generation
+print(f"Token generation for {docs}")
+token = request_token(server_ip, server_port, username, docs)
+print("Received Token:", token)
+
+

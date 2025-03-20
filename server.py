@@ -42,31 +42,52 @@ def verify_hmac(data, received_hmac, aes_key):
     computed_hmac = hmac.new(aes_key, data.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(computed_hmac, received_hmac)
 
-def generate_token(username):
-    """Generates a token containing all documents associated with a user in the uploads directory."""
-    user_files = [f for f in os.listdir("uploads") if f.startswith(f"{username}_")]
+token_store = {}  # Temporary storage in memory
+
+def generate_token(username, docs):
+    """Generates a token and stores it temporarily with document info."""
+    user_files = [
+        f for f in os.listdir("uploads") 
+        if any(f.startswith(f"{username}_{doc}_") for doc in docs)
+    ]
 
     if not user_files:
-        return None  # No documents found for the user
+        return None  # No matching documents found
 
     payload = {
         "username": username,
-        "documents": user_files,  # List of files for the user
-        "exp": datetime.datetime.now(timezone.utc) + datetime.timedelta(seconds=15)  # 15-sec expiry
+        "documents": docs,
+        "exp": datetime.datetime.now(timezone.utc) + datetime.timedelta(seconds=15)
     }
 
     token = jwt.encode(payload, SECRET_KEY, algorithm="HS256")
+    
+    # Store the token temporarily in memory
+    token_store[token] = {
+        "username": username,
+        "documents": docs,
+        "expiry": datetime.datetime.now(timezone.utc) + datetime.timedelta(seconds=15)
+    }
+    
     return token
 
-def verify_token(token):
-    """Verifies a JWT token."""
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])  # ✅ Specify algorithm
-        return payload
-    except jwt.ExpiredSignatureError:
-        return None  # Expired token
-    except jwt.InvalidTokenError:
-        return None  # Invalid token
+def verify_token(token, docs):
+    """Verifies token validity and ensures requested docs match the stored ones."""
+    if token not in token_store:
+        return {"status": "invalid", "message": "Token not found"}
+
+    stored_data = token_store[token]
+    original_docs = stored_data["documents"]
+    
+    # Ensure requested docs are a subset of original docs
+    if not docs == original_docs:
+        return {"status": "invalid", "message": "Unauthorized document request"}
+
+    # Check expiry
+    if datetime.datetime.now(timezone.utc) > stored_data["expiry"]:
+        return {"status": "expired", "message": "Token expired"}
+
+    return {"status": "valid", "username": stored_data["username"], "documents": original_docs}
 
 def handle_client(client_socket):
     global aes_key
@@ -135,7 +156,8 @@ def handle_client(client_socket):
 
         elif request["action"] == "request_token":
                 username = request["username"]
-                token = generate_token(username)
+                docs = request["docs"]
+                token = generate_token(username, docs)
                 response = {"status": "success", "token": token}
                 response_json = json.dumps(response)
                 print(f"[SERVER] Sending response: {response_json}")  # Debugging print
@@ -143,15 +165,17 @@ def handle_client(client_socket):
 
         elif request["action"] == "verify_token":
             token = request["token"]
-            token_data = verify_token(token)
-            if token_data:
+            docs = request["docs"]
+            token_data = verify_token(token, docs)
+
+            if token_data["status"] == "valid":
                 response = {"status": "valid", "username": token_data["username"]}
             else:
-                response = {"status": "invalid"}
-            
+                response = {"status": token_data["status"], "message": token_data["message"]}
+
             response_json = json.dumps(response)
             print(f"[SERVER] Sending response: {response_json}")  # Debugging print
-            client_socket.send(response_json.encode())  # **Send the response to thirdparty**
+            client_socket.send(response_json.encode())  # **Send the response to third party**
 
         else:
             response = {"status": "error", "message": "Invalid request"}
