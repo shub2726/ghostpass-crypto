@@ -23,6 +23,8 @@ def init_db():
             user_id INTEGER,
             aadhar_filename TEXT,
             DL_filename TEXT,
+            aadhar_hash TEXT,
+            DL_hash TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
@@ -35,7 +37,15 @@ def store_user(username, password):
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     try:
-        cursor.execute("INSERT INTO users (username, password_hash, Aadhar_uploaded, DL_uploaded) VALUES (?, ?, ?, ?)", (username, password_hash, 0, 0))
+        cursor.execute(
+            "INSERT INTO users (username, password_hash, Aadhar_uploaded, DL_uploaded) VALUES (?, ?, ?, ?)",
+            (username, password_hash, 0, 0)
+        )
+        user_id = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO documents (user_id, aadhar_filename, DL_filename, aadhar_hash, DL_hash) VALUES (?, ?, ?, ?, ?)",
+            (user_id, "", "", "", "")
+        )
         conn.commit()
         return True
     except sqlite3.IntegrityError:
@@ -57,6 +67,42 @@ def update_document_status(username):
     finally:
         conn.close()
 
+def store_document_hash(username, filename, file_hash):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+
+    try:
+        cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
+        result = cursor.fetchone()
+
+        if result is None:
+            return False
+
+        user_id = result[0]
+
+        if "aadhar" in filename:
+            cursor.execute("""
+                UPDATE documents
+                SET aadhar_filename = ?, aadhar_hash = ?
+                WHERE user_id = ?
+            """, (filename, file_hash, user_id))
+        elif "DL" in filename:
+            cursor.execute("""
+                    UPDATE documents
+                    SET DL_filename = ?, DL_hash = ?
+                    WHERE user_id = ?
+                """, (filename, file_hash, user_id))
+        else:
+            pass
+
+        conn.commit()
+        return True
+    except sqlite3.Error as e:
+        print(f"[ERROR] {e}")
+        return False
+    finally:
+        conn.close()
+    
 def verify_user(username, password):
     """Verify if the username and password match."""
     conn = sqlite3.connect(DB_FILE)

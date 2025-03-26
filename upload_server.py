@@ -7,7 +7,7 @@ import hashlib
 import rsa
 from Crypto.Cipher import AES
 from concurrent.futures import ThreadPoolExecutor
-from database import update_document_status
+from database import update_document_status, store_document_hash
 
 UPLOAD_DIR = "uploads"
 CHUNK_SIZE = 4096  # 4 KB per chunk
@@ -47,7 +47,7 @@ def verify_chunk(data, received_hmac, aes_key):
     received_hmac_hex = received_hmac.hex()
     return hmac.compare_digest(computed_hmac, received_hmac_hex)
 
-def handle_client(conn, aes_key, file, nonce, hmac_received):
+def handle_client(conn, username, aes_key, file, nonce, hmac_received):
     """Receives an encrypted file and stores it after decryption"""
     buffer = ""
     filename = None
@@ -57,6 +57,7 @@ def handle_client(conn, aes_key, file, nonce, hmac_received):
     nonce_filename = base64.b64decode(nonce)
     filename = decrypt_chunk(encrypted_filename, nonce_filename, aes_key).decode()
     file_path = os.path.join(UPLOAD_DIR, os.path.basename(filename))
+    file_hash = hashlib.sha256()
     if not verify_hmac(filename, hmac_received, aes_key):
         print("f[SERVER] Integrity check not passed")
         return
@@ -95,8 +96,10 @@ def handle_client(conn, aes_key, file, nonce, hmac_received):
                 encrypted_chunk = base64.b64decode(chunk_data["chunk"])
                 nonce_chunk = base64.b64decode(chunk_data["nonce"])
                 decrypted_chunk = decrypt_chunk(encrypted_chunk, nonce_chunk, aes_key)
+                file_hash.update(decrypted_chunk)
                 f.write(decrypted_chunk)
-
+        
+        store_document_hash(username, filename, file_hash.hexdigest()) ### store the document hash
     except Exception as e:
         print(f"[SERVER] Error: {str(e)}")
     finally:
@@ -143,7 +146,7 @@ def file_server():
                 continue
             
             hmac_received = data['hmac_value']
-            exe.submit(handle_client, conn, aes_key, data['filename'], data['nonce'], hmac_received)
+            exe.submit(handle_client, conn, username, aes_key, data['filename'], data['nonce'], hmac_received)
         
 if __name__ == "__main__":
     file_server()
