@@ -6,7 +6,10 @@ import base64
 import hmac
 import hashlib
 import datetime
+import sys
+import time
 from Crypto.Cipher import AES
+from tqdm import tqdm 
 
 CHUNK_SIZE = 4096  # 4 KB per chunk
 
@@ -86,8 +89,11 @@ def send_file(filename, aes_key, file_type, server_ip="127.0.0.1", port=12346):
         }
         client_socket.send((json.dumps(metadata) + "\n").encode())
 
+        start_time = time.time()
+        file_size = os.path.getsize(filename)
+        sent_bytes = 0
         # Send file data in chunks
-        with open(filename, "rb") as f:
+        with open(filename, "rb") as f, tqdm(total=file_size, unit='B', unit_scale=True, unit_divisor=1024, desc="Uploading") as pbar:
             while chunk := f.read(CHUNK_SIZE):
                 encrypted_chunk, nonce_chunk = encrypt_chunk(chunk, aes_key)
                 hmac_value = hmac.new(aes_key, chunk, hashlib.sha256).hexdigest()
@@ -95,11 +101,15 @@ def send_file(filename, aes_key, file_type, server_ip="127.0.0.1", port=12346):
                     "chunk": encrypted_chunk,
                     "nonce": nonce_chunk,
                 }
+
+
+                pbar.update(len(chunk))  
                 client_socket.send((json.dumps(chunk_data) + "\n").encode())
+                time.sleep(0.01)
 
         # Send completion message
         client_socket.send((json.dumps({"action": "done"}) + "\n").encode())
-        print("[CLIENT] File sent successfully.")
+        print("\n[CLIENT] File sent successfully.")
 
 
 
