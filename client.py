@@ -22,6 +22,7 @@ def send_request(data, description, port):
     finally:
         client.close()  # Ensure socket closes properly
 
+# CIA Functions
 def encrypt_aes(plaintext, aes_key):
     """Encrypts data using AES-256-GCM and generates HMAC for integrity"""
     cipher = AES.new(aes_key, AES.MODE_GCM)
@@ -37,6 +38,25 @@ def encrypt_aes(plaintext, aes_key):
         hmac_value  # Send HMAC along with encrypted data
     )
 
+def decrypt_aes(ciphertext_b64, nonce_b64, aes_key):
+    """Decrypt AES-256-GCM encrypted data"""
+    try:
+        ciphertext = base64.b64decode(ciphertext_b64)
+        nonce = base64.b64decode(nonce_b64)
+        cipher = AES.new(aes_key, AES.MODE_GCM, nonce=nonce)
+        decrypted_data = cipher.decrypt(ciphertext)
+        return decrypted_data.decode()
+    except Exception as e:
+        print(f"[SERVER] Decryption Error: {str(e)}")  # Log internally
+        return None  # Return None on error
+
+def verify_hmac(data, received_hmac, aes_key):
+    """Verify HMAC to check data integrity"""
+    computed_hmac = hmac.new(aes_key, data.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(computed_hmac, received_hmac)
+
+
+#Functions for SERVER
 def encrypt_chunk(data, aes_key):
     """Encrypt a chunk using AES-256-GCM"""
     cipher = AES.new(aes_key, AES.MODE_GCM)
@@ -81,45 +101,11 @@ def send_file(filename, aes_key, file_type, server_ip="127.0.0.1", port=12346):
         client_socket.send((json.dumps({"action": "done"}) + "\n").encode())
         print("[CLIENT] File sent successfully.")
 
-def request_token(server_ip, server_port, username, docs):
-    """Requests a token for a specific document from the server."""
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect((server_ip, server_port))
-
-    request = {
-        "action": "request_token",
-        "username": username,
-        "docs": docs
-    }
-
-    client_socket.send(json.dumps(request).encode())
-    
-    raw_response = client_socket.recv(4096).decode()  # Read response
-    ##print(f"[DEBUG] Raw Response from Server: {repr(raw_response)}")  # Debugging print
-    
-    if not raw_response.strip():  # Check if empty
-        print("[ERROR] Empty response received from server!")
-        return None
-
-    response = json.loads(raw_response)  # Parse JSON safely
-    client_socket.close()
-    
-    return response.get("token")
-
-def ask_for_needed_documents(third_party_ip, third_party_port):
-    """asks which documents are needed by a third-party for verification."""
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        client_socket.connect((third_party_ip, third_party_port))
-        request = {"action": "ask_needed_docs"}
-        client_socket.send(json.dumps(request).encode())
-        response = json.loads(client_socket.recv(4096).decode())
-        print(f"[CLIENT] Third-Party Response: {response}")
-        return response
-    finally:
-        client_socket.close()
 
 
+# Execution
+
+# Server Communication #1
 # Step 1: Request public key
 response = send_request({"action": "get_public_key"}, "RSA Public Key Request", 12345)
 server_public_key = rsa.PublicKey.load_pkcs1(response["public_key"].encode())
@@ -205,17 +191,33 @@ else:
 if documents_uploaded == 2:
     send_request({"action": "store_file_details", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Stored file details", 12346)
 
-third_party_ip = "127.0.0.1"  # Replace with actual third-party IP
-third_party_port = 6000  # Replace with actual third-party port
-server_ip = "127.0.0.1"
-server_port = 12345
 
-## Step 9: Connecting with Third Party
-docs = ask_for_needed_documents(third_party_ip, third_party_port)
+# Third Party Communication
+# Step 1: Request public key
+response = send_request({"action": "get_public_key"}, "RSA Public Key Request", 6000)
+thirdparty_public_key = rsa.PublicKey.load_pkcs1(response["public_key"].encode())
+print("[CLIENT][THIRD-PARTY] RSA Public Key Received.")
 
-## Step 10: Token Generation
+# Step 2: Generate AES key
+aes_key = os.urandom(32)  # 256-bit AES key
+print(f"[CLIENT][THIRD-PARTY] AES Key Generated: {aes_key.hex()}")
+
+# Step 3: Encrypt AES key with third party's RSA public key
+print("[CLIENT][THIRD-PARTY] Encrypting AES Key using RSA...")
+encrypted_aes_key = rsa.encrypt(aes_key, thirdparty_public_key)
+print(f"[CLIENT][THIRD-PARTY] Encrypted AES Key: {encrypted_aes_key.hex()}")
+
+# Step 4: Send encrypted AES key to third party
+send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key.hex()}, "Encrypted AES Key", 6000)
+
+## Step 5: Connecting with Third Party
+docs = send_request({"action": "ask_needed_docs"}, "Ask Documents", 6000)
+
+
+# Server Communication #2
+## Step 1: Token Generation
 print(f"Token generation for {docs}")
-token = request_token(server_ip, server_port, username, docs)
+token = send_request({"action": "request_token", "username": username,"docs": docs}, "Request Token", 12345)
 print("Received Token:", token)
 
 

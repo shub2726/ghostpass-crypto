@@ -10,7 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from database import init_db, store_user, user_exists, verify_user
 import datetime
 from datetime import timezone
-import jwt  # For generating/verifying tokens
+import jwt  
 
 SECRET_KEY = "super_secret_key"  # Change this in production
 UPLOAD_DIR = "uploads"
@@ -24,6 +24,21 @@ public_key, private_key = rsa.newkeys(2048)
 print("[SERVER] RSA Key Pair Generated.")
 
 aes_key = None  # Store AES key once received
+
+def encrypt_aes(plaintext, aes_key):
+    """Encrypts data using AES-256-GCM and generates HMAC for integrity"""
+    cipher = AES.new(aes_key, AES.MODE_GCM)
+    ciphertext = cipher.encrypt(plaintext.encode())  # No padding needed
+    nonce = cipher.nonce
+
+    # Compute HMAC for integrity check
+    hmac_value = hmac.new(aes_key, plaintext.encode(), hashlib.sha256).hexdigest()
+
+    return (
+        base64.b64encode(ciphertext).decode(),
+        base64.b64encode(nonce).decode(),
+        hmac_value  # Send HMAC along with encrypted data
+    )
 
 def decrypt_aes(ciphertext_b64, nonce_b64, aes_key):
     """Decrypt AES-256-GCM encrypted data"""
@@ -42,6 +57,8 @@ def verify_hmac(data, received_hmac, aes_key):
     computed_hmac = hmac.new(aes_key, data.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(computed_hmac, received_hmac)
 
+
+# THIRD-Party Functions
 token_store = {}  # Temporary storage in memory
 
 def generate_token(username, docs):
@@ -89,6 +106,8 @@ def verify_token(token, docs):
 
     return {"status": "valid", "username": stored_data["username"], "documents": original_docs}
 
+
+# Main Handling of Clients
 def handle_client(client_socket):
     global aes_key
     try:
@@ -188,7 +207,9 @@ def handle_client(client_socket):
     finally:
         client_socket.close()
 
+
 def start_server():
+    """Starts the server."""
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind(("0.0.0.0", 12345))
     server.listen(5)
