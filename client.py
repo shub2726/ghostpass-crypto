@@ -122,16 +122,16 @@ server_public_key = rsa.PublicKey.load_pkcs1(response["public_key"].encode())
 print("[CLIENT] RSA Public Key Received.")
 
 # Step 2: Generate AES key
-aes_key = os.urandom(32)  # 256-bit AES key
-print(f"[CLIENT] AES Key Generated: {aes_key.hex()}")
+aes_key_server = os.urandom(32)  # 256-bit AES key
+print(f"[CLIENT] AES Key Generated: {aes_key_server.hex()}")
 
 # Step 3: Encrypt AES key with server's RSA public key
 print("[CLIENT] Encrypting AES Key using RSA...")
-encrypted_aes_key = rsa.encrypt(aes_key, server_public_key)
-print(f"[CLIENT] Encrypted AES Key: {encrypted_aes_key.hex()}")
+encrypted_aes_key_server = rsa.encrypt(aes_key_server, server_public_key)
+print(f"[CLIENT] Encrypted AES Key: {encrypted_aes_key_server.hex()}")
 
 # Step 4: Send encrypted AES key to server
-send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key.hex()}, "Encrypted AES Key", 12345)
+send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key_server.hex()}, "Encrypted AES Key", 12345)
 
 # Step 5: User selects register or login
 while True:
@@ -146,8 +146,8 @@ username = input("Enter username: ")
 password = input("Enter password: ")
 
 print(f"[CLIENT] Encrypting Username '{username}' & Password with AES-256-GCM...")
-encrypted_username, nonce_username, hmac_username = encrypt_aes(username, aes_key)
-encrypted_password, nonce_password, hmac_password = encrypt_aes(password, aes_key)
+encrypted_username, nonce_username, hmac_username = encrypt_aes(username, aes_key_server)
+encrypted_password, nonce_password, hmac_password = encrypt_aes(password, aes_key_server)
 
 # Step 7: Send encrypted credentials to server
 action_response = send_request({
@@ -171,24 +171,24 @@ if action_response["status"] == "success":
     aadhar_path = None
     dl_path = None
     if action_response["aadhar"] == 0:
-        encrypted_aes_key = rsa.encrypt(aes_key, file_public_key)
-        response = send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Encrypted AES Key", 12346)
+        encrypted_aes_key_server = rsa.encrypt(aes_key_server, file_public_key)
+        response = send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key_server.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Encrypted AES Key", 12346)
         if (response.get("status") == "ready"):
             aadhar_path = input("Enter path to Aadhar file: ")
             res = send_request({"action": "start_file_upload"}, "Starting file upload", 12346)
             if (res.get("status") == "ready"):
-                send_file(aadhar_path, aes_key, "aadhar")
+                send_file(aadhar_path, aes_key_server, "aadhar")
             documents_uploaded += 1
         else:
             print("[CLIENT] Server not ready")
     if action_response["DL"] == 0:
-        encrypted_aes_key = rsa.encrypt(aes_key, file_public_key)
-        response = send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Encrypted AES Key", 12346)
+        encrypted_aes_key_server= rsa.encrypt(aes_key_server, file_public_key)
+        response = send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key_server.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Encrypted AES Key", 12346)
         if (response.get("status") == "ready"):
             dl_path = input("Enter path to DL file: ")
             res = send_request({"action": "start_file_upload"}, "Starting file upload", 12346)
             if (res.get("status") == "ready"):
-                send_file(dl_path, aes_key, "DL")
+                send_file(dl_path, aes_key_server, "DL")
             documents_uploaded += 1
         else:
             print("[CLIENT] Server not ready")
@@ -199,7 +199,7 @@ else:
     exit(1)
 
 if documents_uploaded == 2:
-    send_request({"action": "store_file_details", "aes_key": encrypted_aes_key.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Stored file details", 12346)
+    send_request({"action": "store_file_details", "aes_key": encrypted_aes_key_server.hex(), "username": encrypted_username, "nonce_username": nonce_username}, "Stored file details", 12346)
 
 
 # Third Party Communication
@@ -220,14 +220,56 @@ print(f"[CLIENT][THIRD-PARTY] Encrypted AES Key: {encrypted_aes_key.hex()}")
 # Step 4: Send encrypted AES key to third party
 send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key.hex()}, "Encrypted AES Key", 6000)
 
-## Step 5: Connecting with Third Party
-docs = send_request({"action": "ask_needed_docs"}, "Ask Documents", 6000)
+# Step 5: Connecting with Third Party
+response = send_request({"action": "ask_needed_docs"}, "Ask Documents", 6000)
+
+# Extract encrypted values
+encrypted_docs = response["encrypted_docs"]
+nonce_docs = response["nonce"]
+received_hmac = response["hmac"]
+
+# Decrypt the data
+decrypted_docs = decrypt_aes(encrypted_docs, nonce_docs, aes_key)
+
+if decrypted_docs:
+    # Verify HMAC on the decrypted text
+    if verify_hmac(decrypted_docs, received_hmac, aes_key):
+        docs = json.loads(decrypted_docs)  # Convert JSON string back to list
+        print(f"[CLIENT] Received required docs: {docs}")
+    else:
+        print("[CLIENT] HMAC verification failed! Rejecting data.")
+else:
+    print("[CLIENT] Decryption failed!")
 
 
 # Server Communication #2
 ## Step 1: Token Generation
-print(f"Token generation for {docs}")
-token = send_request({"action": "request_token", "username": username,"docs": docs}, "Request Token", 12345)
-print("Received Token:", token)
+encrypted_username, nonce_username, hmac_username = encrypt_aes(username, aes_key_server)
+encrypted_docs, nonce_docs, hmac_docs = encrypt_aes(json.dumps(docs), aes_key_server)
 
+response = send_request({
+    "action": "request_token",
+    "username": encrypted_username,
+    "nonce_username": nonce_username,
+    "hmac_username": hmac_username,
+    "docs": encrypted_docs,
+    "nonce_docs": nonce_docs,
+    "hmac_docs": hmac_docs
+}, "Request Token", 12345)
 
+# Extract encrypted values
+encrypted_token = response["token"]
+nonce_token = response["nonce_token"]
+hmac_token = response["hmac_token"]
+
+# Decrypt the data
+decrypted_token = decrypt_aes(encrypted_token, nonce_token, aes_key_server)
+
+if decrypted_token:
+    # Verify HMAC on the decrypted text
+    if verify_hmac(decrypted_token, hmac_token, aes_key_server):
+        print(f"[CLIENT] Received Token: {decrypted_token}")
+    else:
+        print("[CLIENT] HMAC verification failed! Rejecting data.")
+else:
+    print("[CLIENT] Decryption failed!")

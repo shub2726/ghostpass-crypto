@@ -85,11 +85,21 @@ def handle_third_party_request(client_socket):
         client_socket.send(json.dumps(response).encode())
 
     elif request["action"] == "ask_needed_docs":
-        # Forward the docs needed to the client for verification
+        # Telling Client the documents to base token off.
+        # List of documents needed
         docs = ["aadhar", "DL"]
-        response = docs
-        print(f"[THIRD-PARTY] Asking for {docs}")
-        # Send the verification response back to the client
+        # Convert list to JSON string (AES encrypts text, not lists)
+        docs_str = json.dumps(docs)
+        # Encrypt docs using AES
+        encrypted_docs, nonce_docs, hmac_docs = encrypt_aes(docs_str, aes_key)
+        print(f"[THIRD-PARTY] Asking for documents (Encrypted)")
+
+        # Send encrypted data
+        response = {
+            "encrypted_docs": encrypted_docs,
+            "nonce": nonce_docs,
+            "hmac": hmac_docs  # Already generated in encrypt_aes()
+        }
         client_socket.send(json.dumps(response).encode())
 
         # Connecting with Server to Verify
@@ -99,27 +109,54 @@ def handle_third_party_request(client_socket):
         print("[TP] RSA Public Key Received.")
 
         # Step 2: Generate AES key
-        aes_key = os.urandom(32)  # 256-bit AES key
-        print(f"[TP] AES Key Generated: {aes_key.hex()}")
+        aes_key_server = os.urandom(32)  # 256-bit AES key
+        print(f"[TP] AES Key Generated: {aes_key_server.hex()}")
 
         # Step 3: Encrypt AES key with server's RSA public key
         print("[TP] Encrypting AES Key using RSA...")
-        encrypted_aes_key = rsa.encrypt(aes_key, server_public_key)
-        print(f"[TP] Encrypted AES Key: {encrypted_aes_key.hex()}")
+        encrypted_aes_key_server = rsa.encrypt(aes_key_server, server_public_key)
+        print(f"[TP] Encrypted AES Key: {encrypted_aes_key_server.hex()}")
 
         # Step 4: Send encrypted AES key to server
-        send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key.hex()}, "Encrypted AES Key", 12345)
+        send_request({"action": "send_encrypted_aes", "aes_key": encrypted_aes_key_server.hex()}, "Encrypted AES Key", 12345)
     
         # Step 5: Send Token to Server and verify token
         token = input("Enter your Token: ")
-        response = send_request({"action": "verify_token", "token": token, "docs": docs}, "Token Verification", 12345)
-        print("[TP] TOKEN Staus:", response)
+        docs_str = json.dumps(docs)
+        encrypted_docs, nonce_docs, hmac_docs = encrypt_aes(docs_str, aes_key_server)
+        encrypted_token, nonce_token, hmac_token = encrypt_aes(token, aes_key_server)
 
-        # Send the verification response back to the client
+        response = send_request({
+            "action": "verify_token",
+            "token": encrypted_token,
+            "nonce_token": nonce_token,
+            "hmac_token": hmac_token,
+            "docs": encrypted_docs,
+            "nonce_docs": nonce_docs,
+            "hmac_docs": hmac_docs
+        }, "Request Token", 12345)
+
+        # Extract encrypted values
+        encrypted_status = response["encrypted_status"]
+        nonce_status = response["nonce_status"]
+        hmac_status = response["hmac_status"]
+
+        # Decrypt the data
+        decrypted_status = decrypt_aes(encrypted_status, nonce_status, aes_key_server)
+
+        if decrypted_status:
+            # Verify HMAC on the decrypted text
+            if verify_hmac(decrypted_status, hmac_status, aes_key_server):
+                print(f"[TP] Received Status: {decrypted_status}")
+            else:
+                print("[TP] HMAC verification failed! Rejecting data.")
+        else:
+            print("[TP] Decryption failed!")
+        # Step 6: Send the verification response back to the client [Did NOT Complete]
         client_socket.send(json.dumps(response).encode())
 
 
-def start_third_party_server(host="0.0.0.0", port=6000):
+def start_third_party_server(host="127.0.0.1", port=6000):
     """Starts the third-party verification server."""
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((host, port))

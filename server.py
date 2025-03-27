@@ -23,6 +23,7 @@ print("[SERVER] Generating RSA Key Pair (2048 bits)...")
 public_key, private_key = rsa.newkeys(2048)
 print("[SERVER] RSA Key Pair Generated.")
 
+# CIA Functions
 aes_key = None  # Store AES key once received
 
 def encrypt_aes(plaintext, aes_key):
@@ -173,33 +174,122 @@ def handle_client(client_socket):
 
             client_socket.send(json.dumps(response).encode())
 
+
         elif request["action"] == "request_token":
-                username = request["username"]
-                docs = request["docs"]
-                token = generate_token(username, docs)
-                response = {"status": "success", "token": token}
-                response_json = json.dumps(response)
-                print(f"[SERVER] Sending response: {response_json}")  # Debugging print
-                client_socket.send(response_json.encode())  # **Send the response to client**
+            encrypted_username = request["username"]
+            nonce_username = request["nonce_username"]
+            hmac_username = request["hmac_username"]
+            encrypted_docs = request["docs"]
+            nonce_docs = request["nonce_docs"]
+            hmac_docs = request["hmac_docs"]
+
+            # Decrypt username
+            username = decrypt_aes(encrypted_username, nonce_username, aes_key)
+
+            # Verify HMAC for username
+            if username is None or not verify_hmac(username, hmac_username, aes_key):
+                response = {"status": "error", "message": "Authentication failed"}
+            
+            else:
+                # Decrypt documents
+                docs_json = decrypt_aes(encrypted_docs, nonce_docs, aes_key)
+                
+                # Verify HMAC for documents
+                if docs_json is None or not verify_hmac(docs_json, hmac_docs, aes_key):
+                    response = {"status": "error", "message": "Document integrity verification failed"}
+                else:
+                    docs = json.loads(docs_json)
+                    token = generate_token(username, docs)
+                    
+                    # Encrypt the token before sending
+                    encrypted_token, nonce_token, hmac_token = encrypt_aes(token, aes_key)
+
+                    response = {
+                        "status": "success",
+                        "token": encrypted_token,
+                        "nonce_token": nonce_token,
+                        "hmac_token": hmac_token
+                    }
+            
+            print(f"[SERVER] Sending encrypted response.")
+            response_json = json.dumps(response)
+            client_socket.send(response_json.encode())
+
+
 
         elif request["action"] == "verify_token":
-            token = request["token"]
-            docs = request["docs"]
-            token_data = verify_token(token, docs)
+            print("[SERVER] Received 'verify_token' request.")
+            encrypted_token = request["token"]
+            nonce_token = request["nonce_token"]
+            hmac_token = request["hmac_token"]
 
-            if token_data["status"] == "valid":
-                response = {"status": "valid", "username": token_data["username"]}
+            encrypted_docs = request["docs"]
+            nonce_docs = request["nonce_docs"]
+            hmac_docs = request["hmac_docs"]
+
+            print("[SERVER] Received encrypted token for verification.")
+
+            # Decrypt the token
+            decrypted_token = decrypt_aes(encrypted_token, nonce_token, aes_key)
+            print(f"[SERVER] Decrypted Token: {decrypted_token}")
+
+            if decrypted_token is None:
+                print("[SERVER] Token decryption failed!")
+                response = {"status": "error", "message": "Token decryption failed"}
+
+            elif not verify_hmac(decrypted_token, hmac_token, aes_key):
+                print("[SERVER] HMAC verification failed for token!")
+                response = {"status": "error", "message": "Token integrity verification failed"}
+
             else:
-                response = {"status": token_data["status"], "message": token_data["message"]}
+                print("[SERVER] Token decrypted and HMAC verified.")
+
+                # Decrypt the documents
+                docs_json = decrypt_aes(encrypted_docs, nonce_docs, aes_key)
+                print(f"[SERVER] Decrypted Docs: {docs_json}")
+
+                if docs_json is None:
+                    print("[SERVER] Document decryption failed!")
+                    response = {"status": "error", "message": "Document decryption failed"}
+
+                elif not verify_hmac(docs_json, hmac_docs, aes_key):
+                    print("[SERVER] HMAC verification failed for documents!")
+                    response = {"status": "error", "message": "Document integrity verification failed"}
+
+                else:
+                    docs = json.loads(docs_json)
+                    print(f"[SERVER] Docs after JSON load: {docs}")
+
+                    # Verify the token
+                    token_data = verify_token(decrypted_token, docs)
+                    print(f"[SERVER] Token verification result: {token_data}")
+
+                    if token_data["status"] == "valid":
+                        response = {"status": "valid"}
+                    else:
+                        response = {"status": token_data["status"], "message": token_data["message"]}
 
             response_json = json.dumps(response)
-            print(f"[SERVER] Sending response: {response_json}")  # Debugging print
-            client_socket.send(response_json.encode())  # **Send the response to third party**
+            # Encrypt the response
+            encrypted_status, nonce_status, hmac_status = encrypt_aes(response_json, aes_key)
+
+            # Send encrypted response
+            response_packet = json.dumps({
+                "encrypted_status": encrypted_status,
+                "nonce_status": nonce_status,
+                "hmac_status": hmac_status
+            })
+
+            print(f"[SERVER] Sending Encrypted Response: {response_packet}")  # Debugging print
+            client_socket.send(response_packet.encode())  # Send the encrypted response
+
+
 
         else:
             response = {"status": "error", "message": "Invalid request"}
             client_socket.send(json.dumps(response).encode())
 
+        
     except Exception as e:
         print(f"[SERVER] Error: {str(e)}")  # Log error
         client_socket.send(json.dumps({"status": "error", "message": "Server error"}).encode())
