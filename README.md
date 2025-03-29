@@ -7,6 +7,10 @@ register or login.
 type the name of the pdfs (make sure its in that directory) and itll show up in the uploads folder.
 if a user has already uploaded, it doesn't ask again. 
 
-server will now generate a JWT token based on uploaded documents of user and will send it to client.
+server will now generate a JWT token based on the hashed uploaded documents of user and will send it to client.
 client has to enter it manually (it will show up in client terminal)
 third party will use it and verify with server..if token mismatches or 15 seconds pass.. token will be invalid.
+
+client to tp
+tp to client
+tp to server
