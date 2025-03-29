@@ -12,6 +12,7 @@ from Crypto.Cipher import AES
 from tqdm import tqdm 
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.asymmetric import padding
+from database import get_public_key
 
 CHUNK_SIZE = 4096  # 4 KB per chunk
 
@@ -27,6 +28,7 @@ def send_request(data, description, port):
     finally:
         client.close()  # Ensure socket closes properly
 
+# C,I,A,NR Functions
 def load_private_key(private_key_path):
     """Load the private key from a PEM file"""
     with open(private_key_path, "rb") as key_file:
@@ -39,6 +41,25 @@ def sign_chunk(private_key, data):
         padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
         hashes.SHA256()
     )
+
+def get_public_key_from_db(username):
+    """Retrieve the user's public key from the database"""
+    # Replace with actual DB call
+    public_key_pem = get_public_key(username)  # Fetch PEM format from DB
+    return serialization.load_pem_public_key(public_key_pem.encode())
+
+def verify_signature(public_key, signature, data):
+    """Verify the signature using the public key"""
+    try:
+        public_key.verify(
+            signature,
+            data,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256()
+        )
+        return True
+    except Exception:
+        return False
 
 def encrypt_aes(plaintext, aes_key):
     """Encrypts data using AES-256-GCM and generates HMAC for integrity"""
@@ -215,7 +236,7 @@ encrypted_password, nonce_password, hmac_password = encrypt_aes(password, aes_ke
 # Step 7: Send encrypted credentials to server
 action_response = None
 if action == "register":
-    encrypted_public_key, nonce_public_key, hmac_public_key = encrypt_aes(user_public_key_pem, aes_key)
+    encrypted_public_key, nonce_public_key, hmac_public_key = encrypt_aes(user_public_key_pem, aes_key_server)
     action_response = send_request({
         "action": action,
         "username": encrypted_username,

@@ -7,6 +7,10 @@ import hashlib
 import os
 from Crypto.Cipher import AES
 from concurrent.futures import ThreadPoolExecutor
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import padding
+from database import get_public_key
 
 # Generate RSA key pair (server side)
 print("[SERVER] Generating RSA Key Pair (2048 bits)...")
@@ -28,7 +32,39 @@ def send_request(data, description, port):
     finally:
         client.close()  # Ensure socket closes properly
 
-# CIA Functions
+# C,I,A,NR Functions
+def load_private_key(private_key_path):
+    """Load the private key from a PEM file"""
+    with open(private_key_path, "rb") as key_file:
+        return serialization.load_pem_private_key(key_file.read(), password=None)
+
+def sign_chunk(private_key, data):
+    """Sign the data with the private key"""
+    return private_key.sign(
+        data,
+        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+        hashes.SHA256()
+    )
+
+def get_public_key_from_db(username):
+    """Retrieve the user's public key from the database"""
+    # Replace with actual DB call
+    public_key_pem = get_public_key(username)  # Fetch PEM format from DB
+    return serialization.load_pem_public_key(public_key_pem.encode())
+
+def verify_signature(public_key, signature, data):
+    """Verify the signature using the public key"""
+    try:
+        public_key.verify(
+            signature,
+            data,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256()
+        )
+        return True
+    except Exception:
+        return False
+    
 def encrypt_aes(plaintext, aes_key):
     """Encrypts data using AES-256-GCM and generates HMAC for integrity"""
     cipher = AES.new(aes_key, AES.MODE_GCM)
