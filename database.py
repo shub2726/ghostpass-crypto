@@ -28,10 +28,19 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS public_keys (
+            key_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            public_key TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT (DATETIME('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
     conn.commit()
     conn.close()
 
-def store_user(username, password):
+def store_user(username, password, public_key):
     """Store user credentials securely using Argon2."""
     password_hash = ph.hash(password)  # Hash password using Argon2
     conn = sqlite3.connect(DB_FILE)
@@ -45,6 +54,10 @@ def store_user(username, password):
         cursor.execute(
             "INSERT INTO documents (user_id, aadhar_filename, DL_filename, aadhar_hash, DL_hash) VALUES (?, ?, ?, ?, ?)",
             (user_id, "", "", "", "")
+        )
+        cursor.execute(
+            "INSERT INTO public_keys (user_id, public_key) VALUES (?, ?)",
+            (user_id, public_key)
         )
         conn.commit()
         return True
@@ -66,6 +79,34 @@ def update_document_status(username):
         return False
     finally:
         conn.close()
+
+def get_public_key(username):
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT id FROM users WHERE username = ?", (username,))
+        result = cursor.fetchone()
+
+        if result is None:
+            return False
+
+        user_id = result[0]
+
+        cursor.execute("SELECT public_key FROM public_keys WHERE user_id = ?", (user_id,))
+        key_result = cursor.fetchone()
+
+        if key_result is None:
+            print("[SERVER] Public key not found.")
+            return None
+
+        return key_result[0]  # Returns the public key in PEM format
+
+    except sqlite3.Error as e:
+        print(f"[ERROR] {e}")
+        return False
+    finally:
+        conn.close()
+    
 
 def store_document_hash(username, filename, file_hash):
     conn = sqlite3.connect(DB_FILE)

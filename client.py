@@ -10,6 +10,8 @@ import sys
 import time
 from Crypto.Cipher import AES
 from tqdm import tqdm 
+from cryptography.hazmat.primitives import serialization, hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 
 CHUNK_SIZE = 4096  # 4 KB per chunk
 
@@ -24,6 +26,19 @@ def send_request(data, description, port):
         return response
     finally:
         client.close()  # Ensure socket closes properly
+
+def load_private_key(private_key_path):
+    """Load the private key from a PEM file"""
+    with open(private_key_path, "rb") as key_file:
+        return serialization.load_pem_private_key(key_file.read(), password=None)
+
+def sign_chunk(private_key, data):
+    """Sign the data with the private key"""
+    return private_key.sign(
+        data,
+        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+        hashes.SHA256()
+    )
 
 def encrypt_aes(plaintext, aes_key):
     """Encrypts data using AES-256-GCM and generates HMAC for integrity"""
@@ -52,8 +67,10 @@ def send_file(filename, aes_key, file_type, server_ip="127.0.0.1", port=12346):
         print("[CLIENT] File not found.")
         return
 
-    print(f"[CLIENT] Sending {filename}...")
+    private_key = load_private_key("private_key.pem")
 
+    print(f"[CLIENT] Sending {filename}...")
+    
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
         client_socket.connect((server_ip, port))
         
@@ -77,9 +94,11 @@ def send_file(filename, aes_key, file_type, server_ip="127.0.0.1", port=12346):
             while chunk := f.read(CHUNK_SIZE):
                 encrypted_chunk, nonce_chunk = encrypt_chunk(chunk, aes_key)
                 hmac_value = hmac.new(aes_key, chunk, hashlib.sha256).hexdigest()
+                signature = sign_chunk(private_key, chunk)
                 chunk_data = {
                     "chunk": encrypted_chunk,
                     "nonce": nonce_chunk,
+                    "signature": base64.b64encode(signature).decode()
                 }
 
 
@@ -129,6 +148,12 @@ def ask_for_needed_documents(third_party_ip, third_party_port):
     finally:
         client_socket.close()
 
+def generate_key_pair():
+    """Generates RSA key pair and stores private key in a PEM file"""
+    (public_key, private_key) = rsa.newkeys(2048)
+    with open("private_key.pem", "wb") as f:
+        f.write(private_key.save_pkcs1())
+    return public_key
 
 # Step 1: Request public key
 response = send_request({"action": "get_public_key"}, "RSA Public Key Request", 12345)
@@ -155,6 +180,11 @@ while True:
         break
     print("Invalid choice. Please enter 1 or 2.")
 
+if action == "register":
+    user_public_key = generate_key_pair()
+    user_public_key_pem = user_public_key.save_pkcs1().decode()
+    print("[CLIENT] Generated public-private key pair for User")
+
 # Step 6: Encrypt username & password with AES
 username = input("Enter username: ")
 password = input("Enter password: ")
@@ -164,15 +194,31 @@ encrypted_username, nonce_username, hmac_username = encrypt_aes(username, aes_ke
 encrypted_password, nonce_password, hmac_password = encrypt_aes(password, aes_key)
 
 # Step 7: Send encrypted credentials to server
-action_response = send_request({
-    "action": action,
-    "username": encrypted_username,
-    "password": encrypted_password,
-    "nonce_username": nonce_username,
-    "nonce_password": nonce_password,
-    "hmac_username": hmac_username,
-    "hmac_password": hmac_password
-}, f"Encrypted Credentials for {action.capitalize()}", 12345)
+action_response = None
+if action == "register":
+    encrypted_public_key, nonce_public_key, hmac_public_key = encrypt_aes(user_public_key_pem, aes_key)
+    action_response = send_request({
+        "action": action,
+        "username": encrypted_username,
+        "password": encrypted_password,
+        "nonce_username": nonce_username,
+        "nonce_password": nonce_password,
+        "hmac_username": hmac_username,
+        "hmac_password": hmac_password,
+        "public_key": encrypted_public_key,
+        "nonce_public_key": nonce_public_key,
+        "hmac_public_key": hmac_public_key
+    }, f"Encrypted Credentials for {action.capitalize()}", 12345)
+else:
+    action_response = send_request({
+        "action": action,
+        "username": encrypted_username,
+        "password": encrypted_password,
+        "nonce_username": nonce_username,
+        "nonce_password": nonce_password,
+        "hmac_username": hmac_username,
+        "hmac_password": hmac_password,
+    }, f"Encrypted Credentials for {action.capitalize()}", 12345)
 
 documents_uploaded = 0
 

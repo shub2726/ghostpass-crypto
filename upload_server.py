@@ -6,8 +6,11 @@ import hmac
 import hashlib
 import rsa
 from Crypto.Cipher import AES
+from cryptography.hazmat.primitives.asymmetric import padding
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import serialization
 from concurrent.futures import ThreadPoolExecutor
-from database import update_document_status, store_document_hash
+from database import update_document_status, store_document_hash, get_public_key
 
 UPLOAD_DIR = "uploads"
 CHUNK_SIZE = 4096  # 4 KB per chunk
@@ -19,6 +22,25 @@ aes_keys = {}  # Dictionary to store AES keys for users
 print("[SERVER] Generating RSA Key Pair (2048 bits)...")
 public_key, private_key = rsa.newkeys(2048)
 print("[SERVER] RSA Key Pair Generated.")
+
+def get_public_key_from_db(username):
+    """Retrieve the user's public key from the database"""
+    # Replace with actual DB call
+    public_key_pem = get_public_key(username)  # Fetch PEM format from DB
+    return serialization.load_pem_public_key(public_key_pem.encode())
+
+def verify_signature(public_key, signature, data):
+    """Verify the signature using the public key"""
+    try:
+        public_key.verify(
+            signature,
+            data,
+            padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+            hashes.SHA256()
+        )
+        return True
+    except Exception:
+        return False
 
 def decrypt_aes(ciphertext_b64, nonce_b64, aes_key):
     """Decrypt AES-256-GCM encrypted data"""
@@ -58,6 +80,7 @@ def handle_client(conn, username, aes_key, file, nonce, hmac_received):
     filename = decrypt_chunk(encrypted_filename, nonce_filename, aes_key).decode()
     file_path = os.path.join(UPLOAD_DIR, os.path.basename(filename))
     file_hash = hashlib.sha256()
+    public_key = get_public_key_from_db(username)
     if not verify_hmac(filename, hmac_received, aes_key):
         print("f[SERVER] Integrity check not passed")
         return
@@ -95,10 +118,17 @@ def handle_client(conn, username, aes_key, file, nonce, hmac_received):
 
                 encrypted_chunk = base64.b64decode(chunk_data["chunk"])
                 nonce_chunk = base64.b64decode(chunk_data["nonce"])
+                signature = base64.b64decode(chunk_data["signature"])
                 decrypted_chunk = decrypt_chunk(encrypted_chunk, nonce_chunk, aes_key)
+
+                if not verify_signature(public_key, signature, decrypted_chunk):
+                    print("[SERVER] Signature verification failed. Aborting.")
+                    return
+
                 file_hash.update(decrypted_chunk)
                 f.write(decrypted_chunk)
         
+        print("[SERVER] Verification done via digital signatures")
         store_document_hash(username, filename, file_hash.hexdigest()) ### store the document hash
     except Exception as e:
         print(f"[SERVER] Error: {str(e)}")

@@ -138,7 +138,8 @@ def handle_client(client_socket):
                             DL_check = user_obj[4]
                             response = {"status": "error", "message": "Username already exists", "aadhar": aadhar_check, "DL": DL_check}
                         else:
-                            if store_user(username, password):
+                            user_public_key = decrypt_aes(request["public_key"], request["nonce_public_key"], aes_key)
+                            if store_user(username, password, user_public_key):
                                 response = {"status": "success", "message": "User registered", "aadhar": 0, "DL": 0}
                             else:
                                 response = {"status": "error", "message": "Database error"}
