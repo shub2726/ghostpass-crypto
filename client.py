@@ -144,7 +144,7 @@ def send_file(filename, aes_key, file_type, server_ip="127.0.0.1", port=12346):
 
                 pbar.update(len(chunk))  
                 client_socket.send((json.dumps(chunk_data) + "\n").encode())
-                time.sleep(0.01)
+                time.sleep(0.001)
 
         # Send completion message
         client_socket.send((json.dumps({"action": "done"}) + "\n").encode())

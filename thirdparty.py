@@ -52,7 +52,7 @@ def get_public_key_from_db(username):
     public_key_pem = get_public_key(username)  # Fetch PEM format from DB
     return serialization.load_pem_public_key(public_key_pem.encode())
 
-def verify_signature(public_key, signature, data):
+def verify_signn(public_key, signature, data):
     """Verify the signature using the public key"""
     try:
         public_key.verify(
@@ -92,7 +92,7 @@ def decrypt_aes(ciphertext_b64, nonce_b64, aes_key):
         print(f"[SERVER] Decryption Error: {str(e)}")  # Log internally
         return None  # Return None on error
 
-def verify_hmac(data, received_hmac, aes_key):
+def verify_sign(data, received_hmac, aes_key):
     """Verify HMAC to check data integrity"""
     computed_hmac = hmac.new(aes_key, data.encode(), hashlib.sha256).hexdigest()
     return hmac.compare_digest(computed_hmac, received_hmac)
@@ -181,11 +181,11 @@ def handle_third_party_request(client_socket):
         decrypted_status = decrypt_aes(encrypted_status, nonce_status, aes_key_server)
 
         if decrypted_status:
-            # Verify HMAC on the decrypted text
-            if verify_hmac(decrypted_status, hmac_status, aes_key_server):
+            # Verify sign on the decrypted text
+            if verify_sign(decrypted_status, hmac_status, aes_key_server):
                 print(f"[TP] Received Status: {decrypted_status}")
             else:
-                print("[TP] HMAC verification failed! Rejecting data.")
+                print("[TP] Signature verification failed! Rejecting data.")
         else:
             print("[TP] Decryption failed!")
         # Step 6: Send the verification response back to the client [Did NOT Complete]
