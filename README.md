@@ -45,7 +45,7 @@ Registers users, uploads documents, and requests verification tokens.
 ### 4. Start the Third-Party Service
 Verifies tokens and grants/denies access.
    ```bash
-   python thirdparty.py
+   python third_party.py
    ```
 
 ## System Flow
